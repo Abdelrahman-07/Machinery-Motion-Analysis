@@ -1,0 +1,5 @@
+# Kafka client — reads messages from the Kafka broker
+kafka-python==2.0.2
+
+# PostgreSQL driver — connects to TimescaleDB and runs SQL queries
+psycopg2-binary==2.9.9

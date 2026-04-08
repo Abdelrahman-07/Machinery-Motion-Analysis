@@ -1,0 +1,19 @@
+# YOLOv8 — object detection and tracking
+ultralytics==8.4.33
+
+# OpenCV headless — video processing, optical flow, drawing bounding boxes
+# "headless" means no GUI/display support (not needed in a container)
+opencv-python-headless==4.9.0.80
+
+# Kafka client — sends messages to the Kafka broker
+kafka-python==2.0.2
+
+# Numerical operations — used by OpenCV and motion analysis
+numpy==1.26.4
+
+torch==2.3.0
+torchvision==0.18.0
+
+# Image processing library used by YOLOv8 internally
+Pillow==10.3.0
+requests==2.31.0

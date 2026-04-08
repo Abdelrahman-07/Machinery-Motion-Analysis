@@ -1,0 +1,136 @@
+services:
+
+  # ── ZOOKEEPER ───────────────────────────────────────────────────
+  # Kafka's coordinator service
+  # Manages which Kafka brokers are alive and stores configuration
+  # Kafka cannot run without Zookeeper
+  zookeeper:
+    image: confluentinc/cp-zookeeper:7.4.0
+    environment:
+      # The port Zookeeper listens on for client connections
+      ZOOKEEPER_CLIENT_PORT: 2181
+    ports:
+      # Expose port 2181 to your Windows machine
+      - "2181:2181"
+
+  # ── KAFKA ────────────────────────────────────────────────────────
+  # The message broker
+  # Receives JSON payloads from CV service and holds them
+  # until the consumer service reads them
+  kafka:
+    image: confluentinc/cp-kafka:7.4.0
+    depends_on: [zookeeper]   # Don't start until Zookeeper is running
+    ports:
+      - "9092:9092"
+    environment:
+      KAFKA_BROKER_ID: 1                          # Unique ID for this broker
+      KAFKA_ZOOKEEPER_CONNECT: zookeeper:2181     # Where Zookeeper is
+      KAFKA_ADVERTISED_LISTENERS: PLAINTEXT://kafka:9092  # Address Kafka tells clients to use
+      KAFKA_OFFSETS_TOPIC_REPLICATION_FACTOR: 1   # Only 1 broker so replication = 1
+    healthcheck:
+      # Check if Kafka's port 9092 is open and accepting connections
+      # nc -z = netcat zero mode (just check if port is open, don't send data)
+      test: ["CMD-SHELL", "nc -z localhost 9092 || exit 1"]
+      interval: 10s     # Check every 10 seconds
+      timeout: 10s      # Give up if check takes longer than 10 seconds
+      retries: 15       # Try 15 times before marking as unhealthy
+      start_period: 30s # Wait 30 seconds before starting health checks
+                        # gives Kafka time to do initial startup
+
+  # ── TIMESCALEDB ──────────────────────────────────────────────────
+  # The database — PostgreSQL with time-series extensions
+  # Stores every frame's analysis result permanently
+  timescaledb:
+    image: timescale/timescaledb:latest-pg14
+    environment:
+      POSTGRES_USER: eagle          # Database username
+      POSTGRES_PASSWORD: eaglepass  # Database password
+      POSTGRES_DB: equipmentdb      # Database name to create on startup
+    ports:
+      - "5432:5432"
+    volumes:
+      # Named volume — persists database data between container restarts
+      - timescaledb_data:/var/lib/postgresql/data
+      # Mount init.sql into the special init folder
+      # PostgreSQL automatically runs any .sql file placed here
+      # on first startup when the database is empty
+      - ./db/init.sql:/docker-entrypoint-initdb.d/init.sql
+    healthcheck:
+      # pg_isready checks if PostgreSQL is ready to accept connections
+      # -U eagle = connect as user "eagle"
+      # -d equipmentdb = check this specific database exists
+      test: ["CMD-SHELL", "pg_isready -U eagle -d equipmentdb"]
+      interval: 5s
+      timeout: 5s
+      retries: 10
+
+  # ── CV SERVICE ───────────────────────────────────────────────────
+  # The computer vision pipeline
+  # Reads video, detects machines, analyzes motion, sends to Kafka
+  cv_service:
+    build: ./cv_service   # Build using cv_service/Dockerfile
+    depends_on:
+      kafka:
+        # Wait until Kafka healthcheck passes before starting
+        # This is stronger than just depends_on: [kafka]
+        condition: service_healthy
+    volumes:
+      # Mount local videos folder into container at /app/videos
+      - ./videos:/app/videos
+      # Shared volume with streamlit_ui for passing annotated frames
+      - frame_data:/app/frames
+    environment:
+      KAFKA_BROKER: kafka:9092
+      VIDEO_PATH: /app/videos/sample.mp4
+      MODEL_PATH: /app/models/best.pt
+
+  # ── CONSUMER SERVICE ─────────────────────────────────────────────
+  # Reads from Kafka and writes to TimescaleDB
+  consumer_service:
+    build: ./consumer_service
+    depends_on:
+      timescaledb:
+        condition: service_healthy   # Wait for DB to be ready
+      kafka:
+        condition: service_started   # Just need Kafka container started
+    environment:
+      KAFKA_BROKER: kafka:9092
+      DB_HOST: timescaledb   # Docker internal hostname = service name
+      DB_USER: eagle
+      DB_PASS: eaglepass
+      DB_NAME: equipmentdb
+
+  # ── STREAMLIT UI ─────────────────────────────────────────────────
+  # The dashboard — reads from DB and displays live results
+  streamlit_ui:
+    build: ./streamlit_ui
+    depends_on:
+      timescaledb:
+        condition: service_healthy
+    ports:
+      - "8501:8501"   # Expose dashboard to browser at localhost:8501
+    volumes:
+      # Same shared volume as cv_service
+      # Streamlit reads the annotated frames CV service writes here
+      - frame_data:/app/frames
+    environment:
+      DB_HOST: timescaledb
+      DB_USER: eagle
+      DB_PASS: eaglepass
+      DB_NAME: equipmentdb
+  
+# stream service
+  stream_service:
+    build: ./stream_service
+    volumes:
+      - frame_data:/app/frames
+    ports:
+      - "5000:5000"
+
+# ── NAMED VOLUMES ──────────────────────────────────────────────────
+volumes:
+  # Persists database data between restarts
+  timescaledb_data:
+  # Shared memory between cv_service and streamlit_ui for video frames
+  frame_data:
+  

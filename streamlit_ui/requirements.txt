@@ -1,0 +1,17 @@
+# The dashboard framework
+streamlit==1.35.0
+
+# PostgreSQL driver
+psycopg2-binary==2.9.9
+
+# Data manipulation — used to handle query results as tables
+pandas==2.2.2
+
+# Chart library — pie charts and bar charts on the dashboard
+plotly==5.22.0
+
+# SQLAlchemy — required by pandas to connect to PostgreSQL
+# pd.read_sql() only works with SQLAlchemy connections, not raw psycopg2
+sqlalchemy==2.0.30
+opencv-python-headless==4.9.0.80
+streamlit-autorefresh==1.0.1
